@@ -1,16 +1,9 @@
 from konlpy.tag import Okt
 from difflib import get_close_matches
+from colors import colors
 
 # 미리 정의된 색상, 패턴, 종류 및 브랜드
-colors = {
-    '빨간색': (255, 0, 0),
-    '파란색': (0, 0, 255),
-    '노란색': (255, 255, 0),
-    '초록색': (0, 255, 0),
-    '검은색': (0, 0, 0),
-    '흰색': (255, 255, 255),
-    '핑크': (255, 192, 203)
-}
+
 types = ['니트', '셔츠', '반팔', '긴팔', '코트', '재킷']
 patterns = ['스트라이프', '체크', '도트', '플라워']
 brands = []
