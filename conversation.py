@@ -13,7 +13,6 @@ def find_closest_color(color_name):
     if color_name in colors:
         return color_name
     
-    # 코랄색 등 입력된 색상에 가장 가까운 색상 찾기
     color_names = list(colors.keys())
     closest_color = get_close_matches(color_name, color_names, n=1, cutoff=0.1)
     
@@ -46,7 +45,7 @@ def extract_clothing_features(sentence):
     return extracted_colors, extracted_types, extracted_patterns, extracted_brands
 
 # 사용자 입력 예제
-sentence = "나는 오늘 코랄색 스트라이프 니트를 입을거야"
+sentence = "나 오늘 흰색 폴로 니트 입고싶어."
 colors, types, patterns, brands = extract_clothing_features(sentence)
 
 print(f"추출된 색상: {', '.join(colors)}")
