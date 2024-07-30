@@ -64,8 +64,8 @@ def extract_features(y, sr, n_mfcc=13):
         np.std(zcr.T, axis=0),
         np.mean(rms.T, axis=0),
         np.std(rms.T, axis=0)
-    ])
-    
+    ]).astype(np.float32)  # float32 타입으로 변환
+
     return features.flatten()
 
 def prepare_training_data(my_voice_files):
@@ -78,17 +78,28 @@ def prepare_training_data(my_voice_files):
         y = clean_audio(y)
         features = extract_features(y, sr)
         features_list.append(features)
-        cluster_ids.append(f"speaker_{i}")
-    
-    return np.array(features_list), np.array(cluster_ids)
+        cluster_ids.append(f"speaker_{i}")  # 문자열로 변환
+
+    return np.array(features_list, dtype=np.float32), np.array(cluster_ids, dtype=str)
+
+def pack_sequence(sequences, labels):
+    lengths = np.array([len(seq) for seq in sequences])
+    max_length = max(lengths)
+
+    # sequences를 패딩하여 동일한 길이로 맞춤
+    padded_sequences = np.zeros((len(sequences), max_length), dtype=np.float32)
+    for i, seq in enumerate(sequences):
+        padded_sequences[i, :len(seq)] = seq
+
+    return padded_sequences, np.array(labels, dtype=str)  # labels를 numpy 배열로 유지
 
 def identify_speakers(audio_path, uisrnn_model):
     y, sr = librosa.load(audio_path)
     y = clean_audio(y)
 
-    features = extract_features(y, sr).reshape(1, -1)
-    features = np.expand_dims(features, axis=0)  # 3D로 확장
-    features = features.copy()  # 배열 복사
+    features = extract_features(y, sr)
+    features = features.reshape(1, -1)  # 2D 배열로 변환
+    features = features.astype(np.float32)  # 데이터 타입 변환
 
     predicted_label = uisrnn_model.predict(features)
     return predicted_label
@@ -132,6 +143,10 @@ def main():
 
     train_features, train_cluster_ids = prepare_training_data(my_voice_files)
 
+    # train_features와 train_cluster_ids가 올바르게 생성되었는지 확인
+    print(f"Train Features Shape: {train_features.shape}")
+    print(f"Train Cluster IDs Shape: {len(train_cluster_ids)}")  # 리스트의 길이 출력
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--observation_dim', type=int, default=train_features.shape[1])
     parser.add_argument('--rnn_hidden_size', type=int, default=128)
@@ -155,7 +170,42 @@ def main():
     args = parser.parse_args()
 
     uisrnn_model = UISRNN(args)
-    uisrnn_model.fit(train_features.copy(), train_cluster_ids.copy(), parser.parse_args())
+
+    # 학습 데이터 시퀀스 패킹
+    packed_train_sequence, rnn_truth = pack_sequence(train_features, train_cluster_ids)
+    print(f"Packed Train Sequence Shape: {packed_train_sequence.shape}")
+    print(f"RNN Truth Length: {len(rnn_truth)}")  # 리스트의 길이 출력
+    print(f"Packed Train Sequence Type: {type(packed_train_sequence)}")
+    print(f"RNN Truth Type: {type(rnn_truth)}")
+    print(f"Packed Train Sequence Dtype: {packed_train_sequence.dtype}")
+    print(f"RNN Truth Dtype: {rnn_truth.dtype}")
+
+    # train_sequence를 올바른 형식으로 변환
+    if not isinstance(packed_train_sequence, np.ndarray) or packed_train_sequence.dtype != np.float32:
+        packed_train_sequence = np.array(packed_train_sequence, dtype=np.float32)
+
+    # rnn_truth를 numpy 배열로 변환
+    rnn_truth = np.array(rnn_truth, dtype=str)
+    print(f"Converted RNN Truth Type: {type(rnn_truth)}")
+    print(f"Converted RNN Truth Dtype: {rnn_truth.dtype}")
+
+    # ensure the dtype of train_cluster_id is str
+    if rnn_truth.dtype.type is not np.str_:
+        rnn_truth = rnn_truth.astype(np.str_)
+    print(f"Final RNN Truth Dtype: {rnn_truth.dtype}")
+
+    uisrnn_model.fit_concatenated(packed_train_sequence, str(rnn_truth), parser.parse_args())  # 복사본 사용
+
+    # 모델 저장
+    uisrnn_model.save('my_voice_model.uisrnn')
+
+    # Step 2: 대화 음성 파일 분석
+    conversation_files = [
+        f"{path}/conversation1.m4a",
+        f"{path}/conversation3.m4a"
+    ]
+
+    uisrnn_model = UISRNN.load('my_voice_model.uisrnn')  # 저장된 모델 불러오기
 
     for conv_file in conversation_files:
         speaker_times = analyze_conversation(conv_file, uisrnn_model)
