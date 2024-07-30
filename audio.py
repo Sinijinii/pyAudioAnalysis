@@ -1,30 +1,44 @@
 import subprocess
 import os
-import numpy as np
 import librosa
 from pydub import AudioSegment
-from sklearn.preprocessing import StandardScaler
 from uisrnn import UISRNN
 import argparse
+import numpy as np
+import torch
 
-path = "C:/Users/SSAFY/Desktop/A409/Audio/pyAudioAnalysis/data/"
+def pack_sequence(sequences, labels):
+    lengths = np.array([len(seq) for seq in sequences])
+    lengths_copy = lengths.copy()
 
-# ffmpeg 경로 설정
-AudioSegment.converter = "C:/ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe"
-AudioSegment.ffprobe = "C:/ffmpeg-master-latest-win64-gpl/bin/ffprobe.exe"
+    padded_sequences = torch.nn.utils.rnn.pad_sequence(
+        [torch.from_numpy(seq) for seq in sequences], batch_first=True)
+
+    padded_sequences_numpy = padded_sequences.detach().cpu().numpy().astype(np.float32)
+
+    if labels.ndim == 1:
+        labels = labels[:, np.newaxis]
+
+    rnn_truth = np.concatenate(labels)
+    return padded_sequences_numpy, rnn_truth
+
+path = "C:/Users/oops5/OneDrive/Desktop/SSAFY/A409/py/pyAudioAnalysis/data/"
+
+AudioSegment.converter = "D:/ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe"
+AudioSegment.ffprobe = "D:/ffmpeg-master-latest-win64-gpl/bin/ffprobe.exe"
 
 def convert_to_wav(input_path, output_path):
-    command = f"C:/ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe -y -i {input_path} {output_path}"
+    command = f"D:/ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe -y -i {input_path} {output_path}"
     subprocess.call(command, shell=True)
 
 def clean_audio(y):
-    y = np.nan_to_num(y)  # NaN 값을 0으로 변환
-    y[np.isinf(y)] = 0  # 무한대 값을 0으로 변환
+    y = np.nan_to_num(y)
+    y[np.isinf(y)] = 0
     return y
 
 def extract_features(y, sr, n_mfcc=13):
-    y = clean_audio(y)  # NaN과 무한대 값 제거
-    if len(y) < 2048:  # 최소 신호 길이를 보장
+    y = clean_audio(y)
+    if len(y) < 2048:
         y = np.pad(y, (0, 2048 - len(y)), 'constant')
 
     mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc)
@@ -70,7 +84,7 @@ def prepare_training_data(my_voice_files):
 
 def identify_speakers(audio_path, uisrnn_model):
     y, sr = librosa.load(audio_path)
-    y = clean_audio(y)  # NaN과 무한대 값 제거
+    y = clean_audio(y)
 
     features = extract_features(y, sr).reshape(1, -1)
     features = np.expand_dims(features, axis=0)  # 3D로 확장
@@ -79,11 +93,35 @@ def identify_speakers(audio_path, uisrnn_model):
     predicted_label = uisrnn_model.predict(features)
     return predicted_label
 
+def analyze_conversation(conversation_file, uisrnn_model):
+    wav_file = conversation_file.replace('.m4a', '.wav')
+    convert_to_wav(conversation_file, wav_file)
+
+    y, sr = librosa.load(wav_file)
+    y = clean_audio(y)
+
+    window_size = sr * 10  # 10초 단위로 분석
+    steps = range(0, len(y), window_size)
+    
+    speaker_times = {}
+    
+    for i in steps:
+        y_window = y[i:i + window_size]
+        features = extract_features(y_window, sr)
+        features = features.reshape(1, -1)  # 2D 배열로 변환
+        features = features.astype(np.float32)  # 데이터 타입 변환
+
+        predicted_label = uisrnn_model.predict(features)
+        speaker = predicted_label[0]
+
+        if speaker not in speaker_times:
+            speaker_times[speaker] = 0
+        speaker_times[speaker] += 10  # 10초 추가
+
+    return speaker_times
+
 def main():
-    conversation_files = [
-        f"{path}/conversation1.m4a",
-        f"{path}/conversation3.m4a"
-    ]
+    # Step 1: 목소리 학습 모델 생성
     my_voice_files = [
         f"{path}/my_voice1.m4a",
         f"{path}/my_voice2.m4a",
@@ -120,13 +158,10 @@ def main():
     uisrnn_model.fit(train_features.copy(), train_cluster_ids.copy(), parser.parse_args())
 
     for conv_file in conversation_files:
-        wav_file = conv_file.replace('.m4a', '.wav')
-        convert_to_wav(conv_file, wav_file)
-
-        predicted_labels = identify_speakers(wav_file, uisrnn_model)
-
+        speaker_times = analyze_conversation(conv_file, uisrnn_model)
         print(f"File: {os.path.basename(conv_file)}")
-        print(f"Predicted labels: {predicted_labels}")
+        for speaker, time in speaker_times.items():
+            print(f"Speaker {speaker}: {time} seconds")
         print()
 
 if __name__ == "__main__":
